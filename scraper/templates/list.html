@@ -52,11 +52,11 @@
                 <td>{{ obj.date }}</td>
                 <td>{{ obj.time }}</td>
                 <td>{{ obj.location }}</td>
-                <!-- <td>
+                <td>
                     {% for author in obj.authors.all %}
                         {{ author.name }}{% if not forloop.last %}, {% endif %}
                     {% endfor %}
-                </td> -->
+                </td>
             </tr>
             {% empty %}
             <tr>

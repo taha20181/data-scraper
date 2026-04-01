@@ -52,66 +52,47 @@ class ScraperAction:
         
         return re.sub(r'\s+', ' ', text.strip())
 
-    def _get_text(self):
-        pass
-
+    def _safe_text(self, tag):
+            return tag.get_text(strip=True) if tag else None
+    
     def _abs_url(self):
         pass
 
+    def _extract_content(self, soup):
+        container = soup.find("div", id="sitewrap")
+        if not container:
+            return None
+
+        return container.find("div", class_="content-wrap container")
+
+    def _extract_location(self, container):
+        div = container.find("div")
+        if not div:
+            return None
+
+        text = div.get_text(strip=True)
+        return text.replace("Location: ", "")
+
 class ScrapeSchedule(ScraperAction):
     def parse_day_wise_schedule(self, soup: BeautifulSoup):
-        records = []
+        if not soup:
+            return []
 
         ul = soup.find("ul", id="agenda")
+        if not ul:
+            return []
+
         lis = ul.find_all("li")
+        if not lis:
+            return []
 
-        logger.info(f'List item count : {len(lis)}')
-
+        records = []
         session_date = lis[0].get_text(strip=True)
         
         for li in lis:
-            parent_div = li.find("div")
-
-            if not parent_div:
-                continue
-
-            child_divs = parent_div.find_all("div", recursive=False)
-
-            if len(child_divs) < 2:
-                continue
-
-            span1 = child_divs[0].find("span")
-            span2 = child_divs[1].find("span")
-            div = child_divs[1].find("div")
-            section = child_divs[1].find("section")
-            section_div = section.find("div") if section else []
-            section_child_divs = section_div.find_all("div") if section_div else []
-
-            session_time = span1.get_text(strip=True) if span1 else None
-            session_title = span2.get_text(strip=True) if span2 else None
-            location = div.get_text(strip=True) if div else None
-            session_location = location.replace("Location: ", "") if location else None
-            
-            session_speakers = []
-
-            for d in section_child_divs:
-                authors_text = d.get_text(strip=True).replace("Speaker:", "")
-                authors_text = authors_text.replace("Moderator:", "")
-                authors_text = authors_text.replace("Panelist:", "")
-                session_speakers.append(authors_text)
-
-            # logger.info(f'Parsed schedule item: {session_date} | {session_time} | {session_title} | {session_location} | {session_speakers}')
-
-            records.append({
-                'session_title': session_title,
-                'session_type': 'session',
-                'poster_abstract_title': '',
-                'authors': session_speakers,
-                'affiliations': '',
-                'date': session_date,
-                'time': session_time,
-                'location': session_location,
-            })
+            item = self._parse_schedule_item(li, session_date)
+            if item:
+                records.append(item)
 
         return records
 
@@ -121,45 +102,87 @@ class ScrapeSchedule(ScraperAction):
             return []
     
         all_records = []
-        container = soup.find("div", id="sitewrap")
-        content = container.find("div", class_="content-wrap container")
+        content = self._extract_content(soup)
+        if not content:
+            return []
 
-        ul = content.find("ul")
-        lis = ul.find_all("li")[1:]
+        schedule_links = self._extract_schedule_links(content)
 
-        for li in lis:
-            a_tag = li.find("a", href=True)
-            if a_tag:
-                full_url = urljoin(BASE_URL, a_tag["href"])
-                logger.info(f'FULL URL : {full_url}')
-
-                # individual schedule page
-                page = self._get(full_url)
-                records = self.parse_day_wise_schedule(page)
-                all_records.append(records)
+        return [
+            self.parse_day_wise_schedule(self._get(link))
+            for link in schedule_links
+            if link
+        ]
 
         return all_records
 
+    def _parse_schedule_item(self, li, session_date):
+        parent_div = li.find("div")
+        if not parent_div:
+            return None
+
+        child_divs = parent_div.find_all("div", recursive=False)
+        if len(child_divs) < 2:
+            return None
+
+        # Extract basic fields
+        session_time = self._safe_text(child_divs[0].find("span"))
+        session_title = self._safe_text(child_divs[1].find("span"))
+        session_location = self._extract_location(child_divs[1])
+        session_speakers = self._extract_speakers(child_divs[1])
+
+        return {
+            'session_title': session_title,
+            'session_type': 'session',
+            'poster_abstract_title': '',
+            'authors': session_speakers,
+            'affiliations': '',
+            'date': session_date,
+            'time': session_time,
+            'location': session_location,
+        }
+
+    def _extract_speakers(self, container):
+        section = container.find("section")
+        if not section:
+            return []
+
+        section_div = section.find("div")
+        if not section_div:
+            return []
+
+        speakers = []
+        for d in section_div.find_all("div"):
+            text = self._clean_speaker_text(d.get_text(strip=True))
+            if text:
+                speakers.append(text)
+
+        return speakers
+
+    def _clean_speaker_text(self, text: str) -> str:
+        prefixes = ("Speaker:", "Moderator:", "Panelist:")
+        for prefix in prefixes:
+            text = text.replace(prefix, "")
+        return text.strip()
+
+    def _extract_schedule_links(self, content):
+        ul = content.find("ul")
+        if not ul:
+            return []
+
+        links = []
+        for li in ul.find_all("li")[1:]:  # skip first
+            a_tag = li.find("a", href=True)
+            if not a_tag:
+                continue
+
+            full_url = urljoin(BASE_URL, a_tag["href"])
+            logger.info(f"FULL URL : {full_url}")
+            links.append(full_url)
+
+        return links
+
     def execute(self):
-        homepage = self._get(INDEX_URL)
-        
-        scripts = homepage.find_all("script")
-        tile_json = None
-
-        for script in scripts:
-            if script.string and "TileScreen" in script.string:
-                match = re.search(r'TileScreen\([^,]+,\s*(\{.*?\})\s*,', script.string, re.DOTALL)
-                if match:
-                    tile_json = match.group(1)
-                    break
-
-        print("TILE JSON:", tile_json)  # Log first 500 chars of the JSON
-        # data = json.loads(tile_json)
-        # tiles = data.get("tiles", [])
-
-        # for tile in tiles:
-            # print(tile.get("accessibilityLabel"), "->", tile.get("href"))
-        
         schedule_url = "https://sgo2026annualmeeting.eventscribe.net/agenda.asp?BCFO=&pfp=Browse%20by%20Day&fa=&fb=&fc=&fd=&all=1"
         all_records = self.parse_full_schedule_page(schedule_url)
 
@@ -167,80 +190,108 @@ class ScrapeSchedule(ScraperAction):
 
 class ScrapePoster(ScraperAction):
     def parse_poster_detail(self, soup: BeautifulSoup):
-        records = []
+        if not soup:
+            return []
 
         ul = soup.find("ul", id="agenda")
-        lis = ul.find_all("li")[1:]
+        if not ul:
+            return []
 
-        for li in lis:
-            div = li.find("div", class_="prestitle")
-            anchor = div.find("a", href=True)
-            
-            if anchor:
-                poster_detail_url = urljoin(BASE_URL, anchor["href"])
-                parsed_url = urlparse(poster_detail_url)
-                query_params = parse_qs(parsed_url.query)
-                poster_id = query_params.get("PosterID", [None])[0]
-                poster_detail_page = self._get(poster_detail_url)
-
-                div = poster_detail_page.find("div", id=f"poster-info-{poster_id}")
-
-                h1 = div.find("h1") if div else None
-                poster_title = h1.get_text(strip=True) if h1 else None
-                location = div.find("div", class_="pres-tidbit") if div else None
-                location_text = location.get_text(strip=True) if location else None
-                location = location_text.replace("Location: ", "") if location_text else None
-
-                ul = div.find("ul", class_="speakers-wrap") if div else None
-                li_items = ul.find_all("li") if ul else []
-
-                speakers = []
-                for li_item in li_items:
-                    anchor = li_item.find("a", href=True)
-                    speaker = anchor.get_text(strip=True) if anchor else None
-                    if speaker:
-                        speakers.append(speaker)
-            
-                # logger.info(f'Parsed poster detail for {poster_id}: {poster_title} | {location} | {speakers}')
-
-                records.append({
-                    'session_title': poster_title,
-                    'session_type': 'poster',
-                    'poster_abstract_title': '',
-                    'authors': speakers,
-                    'affiliations': '',
-                    'date': '',
-                    'time': '',
-                    'location': location,
-                })
+        records = []
+        for li in ul.find_all("li")[1:]:
+            item = self._parse_poster_item(li)
+            if item:
+                records.append(item)
 
         return records
+
+    def _parse_poster_item(self, li):
+        title_div = li.find("div", class_="prestitle")
+        if not title_div:
+            return None
+
+        anchor = title_div.find("a", href=True)
+        if not anchor:
+            return None
+
+        poster_url = urljoin(BASE_URL, anchor["href"])
+        poster_id = self._extract_poster_id(poster_url)
+
+        poster_soup = self._get(poster_url)
+        if not poster_soup:
+            return None
+
+        return self._extract_poster_details(poster_soup, poster_id)
+
+    def _extract_poster_id(self, url: str):
+        parsed = urlparse(url)
+        return parse_qs(parsed.query).get("PosterID", [None])[0]
+
+    def _extract_poster_details(self, soup, poster_id):
+        container = soup.find("div", id=f"poster-info-{poster_id}")
+        if not container:
+            return None
+
+        title = self._safe_text(container.find("h1"))
+        location = self._extract_location(container)
+        speakers = self._extract_speakers_from_ul(container)
+
+        return {
+            'session_title': title,
+            'session_type': 'poster',
+            'poster_abstract_title': '',
+            'authors': speakers,
+            'affiliations': '',
+            'date': '',
+            'time': '',
+            'location': location,
+        }
+
+    def _extract_speakers_from_ul(self, container):
+        ul = container.find("ul", class_="speakers-wrap")
+        if not ul:
+            return []
+
+        speakers = []
+        for li in ul.find_all("li"):
+            anchor = li.find("a", href=True)
+            name = self._safe_text(anchor)
+            if name:
+                speakers.append(name)
+
+        return speakers
     
     def parse_full_poster_page(self, url: str):
         soup = self._get(url)
+        if not soup:
+            return []
 
-        all_records = []
-        container = soup.find("div", id="sitewrap")
-        content = container.find("div", class_="content-wrap container")
+        content = self._extract_content(soup)
+        if not content:
+            return []
 
         ul = content.find("ul", class_="list-group alphaList clearfix")
-        lis = ul.find_all("li")[1:]
+        if not ul:
+            return []
 
-        for li in lis[:2]:
-            a_tag = li.find("a", href=True)
-            if a_tag:
-                full_url = urljoin(BASE_URL + "/posters/", a_tag["href"])
+        poster_links = [
+            urljoin(BASE_URL + "/posters/", a["href"])
+            for li in ul.find_all("li")[1:]
+            if (a := li.find("a", href=True))
+        ]
 
-                # individual schedule page
-                page = self._get(full_url)
-                records = self.parse_poster_detail(page)
-                all_records.append(records)
-                
+        records = []
+        for link in poster_links:
+            page = self._get(link)
+            if not page:
+                continue
+
+            records.extend(self.parse_poster_detail(page))
+
+        return records
         return all_records
 
     def execute(self):
-        homepage = self._get(INDEX_URL)
-
         poster_url = "https://sgo2026annualmeeting.eventscribe.net/posters/browseByPosterTitle.asp?pfp=BrowsebyTitle"
         all_records = self.parse_full_poster_page(poster_url)
 

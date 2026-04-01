@@ -44,9 +44,7 @@ def export(request):
     format = request.GET.get("format")
     data = []
 
-    queryset = Session.objects.filter(
-        # session_type="poster"
-    )
+    queryset = Session.objects.filter()
 
     for obj in queryset:
         data.append({
@@ -55,15 +53,21 @@ def export(request):
             "Date": obj.date if obj.date else "",
             "Time": obj.time if obj.time else "",
             "Location": obj.location if obj.location else "",
-            "Authors": ", ".join([a.name for a in obj.authors.all()])
+            "Authors": ", ".join([a for a in obj.authors])
         })
 
     df = pd.DataFrame(data)
 
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    response["Content-Disposition"] = "attachment; filename=data.xlsx"
+    if format == "xslx":
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = "attachment; filename=export_data.xlsx"
+    else:
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = "attachment; filename=export_data.csv"
+        df.to_csv(response, index=False)
+        return response
 
     df.to_excel(response, index=False)
 
