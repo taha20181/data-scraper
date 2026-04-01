@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="card">
+
+    <h3>Conference Data</h3>
+
+    <!-- Filters -->
+    <div class="filters">
+        <form method="get">
+
+            <input 
+                type="text" 
+                name="search" 
+                placeholder="Search title..."
+                value="{{ request.GET.search }}"
+            >
+
+            <select name="type">
+                <option value="">All Types</option>
+                <option value="session" {% if request.GET.type == "session" %}selected{% endif %}>
+                    Session
+                </option>
+                <option value="poster" {% if request.GET.type == "poster" %}selected{% endif %}>
+                    Poster
+                </option>
+            </select>
+
+            <button type="submit" class="btn">Apply</button>
+        </form>
+    </div>
+
+    <!-- Table -->
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Location</th>
+                <th>Authors</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for obj in page_obj %}
+            <tr>
+                <td>{{ obj.session_title }}</td>
+                <td>{{ obj.session_type }}</td>
+                <td>{{ obj.date }}</td>
+                <td>{{ obj.time }}</td>
+                <td>{{ obj.location }}</td>
+                <!-- <td>
+                    {% for author in obj.authors.all %}
+                        {{ author.name }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                </td> -->
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6">No data found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination">
+
+        {% if page_obj.has_previous %}
+            <a href="?page=1">&laquo; First</a>
+            <a href="?page={{ page_obj.previous_page_number }}">Prev</a>
+        {% endif %}
+
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}">Next</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+        {% endif %}
+
+    </div>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="grid">
+
+    <div class="card">
+        <h3>Total Sessions</h3>
+        <h1>{{ total_sessions }}</h1>
+    </div>
+
+    <div class="card">
+        <h3>Total Posters</h3>
+        <h1>{{ total_posters }}</h1>
+    </div>
+
+    <div class="card">
+        <h3>Total Authors</h3>
+        <h1>{{ total_authors }}</h1>
+    </div>
+
+</div>
+
+<br>
+
+<div class="card">
+    <h3>Quick Actions</h3>
+    <br>
+    <a href="/list/" class="btn">View All Data</a>
+    <a href="/export/" class="btn">Export Excel</a>
+</div>
+
+{% endblock %}
